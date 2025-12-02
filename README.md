@@ -1,36 +1,149 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Multi Tenant App
 
-## Getting Started
+Next.js app for managing **organizations**, **outlines**, and **team members** using **Better Auth** + Postgres.
 
-First, run the development server:
+- Multiple organizations per user
+- Org switcher in the left sidebar (Dashboard + Team)
+- Team Info page with members list, roles, invite by email, and owner-only remove
+- Join Organization page with real invitation IDs + mock join by org ID
+- Outlines table per org with add/edit/delete sections
+
+---
+
+## 1. Requirements
+
+- Node 20+
+- Postgres 16+ running locally
+- `DATABASE_URL` pointing at your DB
+
+Example local DB (already used in this project):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+postgres://user@localhost:5432/multitenant_workspace
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Make sure that database exists:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+createdb multitenant_workspace
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 2. Configure environment
 
-To learn more about Next.js, take a look at the following resources:
+In `web/.env` set:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+DATABASE_URL=postgres://user@localhost:5432/multitenant_workspace
+BETTER_AUTH_SECRET=some-long-random-string
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+`BETTER_AUTH_SECRET` can be any long random value in dev.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 3. Run migrations
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+From the `web` directory:
+
+```bash
+cd web
+
+# Run Better Auth migrations (creates user/session/org/member/invitation tables)
+npx @better-auth/cli@latest migrate
+
+# If you ever fully wipe the schema:
+#   psql "$DATABASE_URL" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+#   then re-run the migrate command.
+
+# Create the outlines table (only needed if missing)
+psql "$DATABASE_URL" <<'SQL'
+CREATE TABLE IF NOT EXISTS outlines (
+  id              SERIAL PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES "organization"("id") ON DELETE CASCADE,
+  header          TEXT NOT NULL,
+  section_type    TEXT NOT NULL,
+  status          TEXT NOT NULL,
+  target          INTEGER NOT NULL DEFAULT 0,
+  limit_value     INTEGER NOT NULL DEFAULT 0,
+  reviewer        TEXT NOT NULL DEFAULT 'ASSIM'
+);
+SQL
+```
+
+---
+
+## 4. Start the dev server
+
+From `web/`:
+
+```bash
+npm install        # or pnpm/yarn
+npm run dev
+```
+
+Then open:
+
+- Dashboard: `http://localhost:3000/`
+- Team Info: `http://localhost:3000/team`
+- Join Org: `http://localhost:3000/join-organization`
+
+---
+
+## 5. Feature
+
+### Organizations & switching
+
+- Create an org from `/create-organization`.
+- Switch orgs from the top-left dropdown in the sidebar.
+- Org context is driven by `?orgId=...` in the URL and kept in sync between:
+  - Dashboard: `/?orgId=<org-id>`
+  - Team Info: `/team?orgId=<org-id>`
+
+### Outlines (Table dashboard)
+
+- Per-org outlines table (sections) on the main dashboard.
+- Add/edit/delete sections via the right-hand sheet.
+- Data stored in the `outlines` table keyed by `organization_id`.
+
+### Team Info / members
+
+- `/team?orgId=<org-id>` shows:
+  - Organization name + member count
+  - Members with Name, Email, Role (Owner/Member)
+- **Owner-only actions:**
+  - Invite by email (always creates `member` role invites)
+  - Remove members
+- Removal deletes from the `member` table and the removed user can no longer access that org’s Team page.
+
+### Join Organization
+
+- `/join-organization` supports:
+  - Real invitation IDs via `authClient.organization.acceptInvitation`
+  - Mock join by organization ID for local testing via `/api/organizations/mock-join`
+- After joining, the app sets the active org and redirects you into the workspace.
+
+---
+
+## 6. Useful commands
+
+Reset the local DB schema (dev-only):
+
+```bash
+psql "$DATABASE_URL" <<'SQL'
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+SQL
+
+cd web
+npx @better-auth/cli@latest migrate
+```
+
+Re-run only outlines migration if needed:
+
+```bash
+psql "$DATABASE_URL" -c 'TRUNCATE TABLE outlines RESTART IDENTITY CASCADE;'
+```
+
+This should be enough to get the whole stack running locally and understand what’s wired up.

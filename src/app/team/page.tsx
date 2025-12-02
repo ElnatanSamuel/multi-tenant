@@ -3,13 +3,13 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import DashboardShell from "@/components/dashboard-shell";
+import TeamShell from "@/components/team-shell";
 
-type HomeProps = {
+type TeamPageProps = {
   searchParams?: { orgId?: string };
 };
 
-export default async function Home({ searchParams }: HomeProps) {
+export default async function TeamPage({ searchParams }: TeamPageProps) {
   const session = await auth.api.getSession({ headers: await headers() });
 
   if (!session) {
@@ -62,6 +62,7 @@ export default async function Home({ searchParams }: HomeProps) {
 
   let organizationName = "Organization";
   let organizations: { id: string; name: string }[] = [];
+  let currentUserRole: string | null = null;
 
   if (db && user?.id) {
     try {
@@ -103,15 +104,40 @@ export default async function Home({ searchParams }: HomeProps) {
       } else if (result.rows[0]?.name) {
         organizationName = result.rows[0].name as string;
       }
-    } catch {}
+    } catch {
+      // keep defaults on error
+    }
+  }
+
+  if (db && user?.id && organizationId) {
+    try {
+      const roleResult = await db.query(
+        `SELECT role FROM member WHERE "organizationId" = $1 AND "userId" = $2 LIMIT 1`,
+        [organizationId, user.id]
+      );
+
+      const row = roleResult.rows[0] as { role?: string } | undefined;
+
+      if (!row?.role) {
+        // User is not a member of this organization; they should not be able
+        // to access the Team page for it.
+        redirect("/join-organization");
+      }
+
+      currentUserRole = row.role as string;
+    } catch {
+      // On error, treat as non-member and redirect to join.
+      redirect("/join-organization");
+    }
   }
 
   return (
-    <DashboardShell
+    <TeamShell
       userName={userName}
       userEmail={userEmail}
       orgId={organizationId}
       organizationName={organizationName}
+      currentUserRole={currentUserRole}
       organizations={organizations}
     />
   );
