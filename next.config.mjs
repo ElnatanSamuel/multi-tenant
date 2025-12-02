@@ -1,5 +1,4 @@
-import type { NextConfig } from "next";
-
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   // Do not fail `next build` on TypeScript errors (Vercel will still warn)
   typescript: {
